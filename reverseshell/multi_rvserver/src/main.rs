@@ -298,7 +298,7 @@ fn main() {
                             println!("Received from client {}: \"{}\"\0", client_id, message);
             
                             if message == "exit" {
-i
+
                                 println!("Client {} requested exit", client_id);
                                 break;
                             
