@@ -7,8 +7,19 @@ use std::fs::File;
 use std::path::Path;
 use std::fs;
 use std::io;
+use sysinfo::{Components, Disks, Networks, Pid, System};
+use std::thread;
+use std::time::Duration;
+use std::env;
 
 
+/* Function to check if a file exists and return true or false. */
+fn file_exists(path: &str) -> bool {
+
+    // Check if the file exists.
+    Path::new(path).exists()
+
+}
 fn executecommand(cmd: &String) -> String{
 
      // Declare variables for shell and argument.
@@ -61,6 +72,44 @@ fn cat(path: &Path) -> io::Result<String> {
         Ok(_) => Ok(s),
         Err(e) => Err(e),
     }
+}
+
+/* Function to get system information. */
+fn get_sys_info() -> Vec<String> {
+
+    let mut sys = System::new_all();
+
+    let mut output = Vec::new();
+
+    // First we update all information of our `System` struct.
+    sys.refresh_all();
+
+    println!("=> system:");
+    output.push ("=> system:".to_string());
+    // RAM and swap information:
+    //println!("total memory: {} bytes", sys.total_memory());
+    output.push(format!("total memory: {} bytes", sys.total_memory()));
+    println!("used memory : {} bytes", sys.used_memory());
+    output.push(format!("used memory : {} bytes", sys.used_memory()));
+    println!("total swap  : {} bytes", sys.total_swap());
+    output.push(format!("total swap  : {} bytes", sys.total_swap()));
+    println!("used swap   : {} bytes", sys.used_swap());
+    output.push(format!("used swap   : {} bytes", sys.used_swap()));
+
+    // Display system information:
+    println!("System name:             {:?}", System::name());
+    output.push(format!("System name:             {:?}", System::name()));
+    println!("System kernel version:   {:?}", System::kernel_version());
+    output.push(format!("System kernel version:   {:?}", System::kernel_version()));
+    println!("System OS version:       {:?}", System::os_version());
+    output.push(format!("System OS version:       {:?}", System::os_version()));
+    println!("System host name:        {:?}", System::host_name());
+    output.push(format!("System host name:        {:?}", System::host_name()));
+    println!("System uptime:           {:?}", System::uptime());
+
+    // Return the output.
+    output
+
 }
 
 fn main() {
@@ -165,6 +214,7 @@ fn main() {
 
             // First token is the command (download/exec/upload) used to determine what to do.
             let srv_cmd = tokens[0];
+            let mut sys = System::new_all();
 
             match srv_cmd {
 
@@ -239,31 +289,140 @@ fn main() {
                     
                 }
 
+                "rm" => {
+
+                    // Debug.
+                    println!("Removing file from server.");
+
+                    // Check token length.
+
+                    if tokens.len() < 2 {
+            
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: No filename provided for removal.\0").unwrap();
+                        continue;
+            
+                    }
+
+
+                    // Get the first token in the index and set to the filename.
+                    let filename = tokens[1];
+
+                    // Check if the file exists.
+                    if !Path::exists(Path::new(filename)) {
+
+                        // Send a successful message to the server.
+                        tcpstream_write.write_all(b"File doesn't exist.\0").unwrap();
+                        continue;
+                    
+                    }
+
+                    // Remove the file from the server.
+                    fs::remove_file(filename).unwrap();
+                       
+                
+                    // Check if the file exists.
+                    if !Path::exists(Path::new(filename)) {
+
+                        // Send a successful message to the server.
+                        tcpstream_write.write_all(b"File deleted.\0").unwrap();
+                    
+                    } else {
+
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: File deletion failed.\0").unwrap();}
+
+                }
+
+                "rmdir" => {
+
+                    // Debug.
+                    println!("Removing directory from server.");
+
+                    // Check token length.
+                    if tokens.len() < 2 {
+            
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: No directory provided for removal.\0").unwrap();
+                        continue;
+            
+                    }
+                    
+                    // Get the first token in the index and set to the directory.
+                    let directory = tokens[1];
+
+                    // Check if the directory exists.
+                    if !Path::exists(Path::new(directory)) {
+
+                        // Send a successful message to the server.
+                        tcpstream_write.write_all(b"Directory doesn't exist.\0").unwrap();
+                        continue;
+                    
+                    }
+
+                    // Remove the directory from the server.
+                    fs::remove_dir_all(directory).unwrap();
+                    tcpstream_write.write_all(b"Directory deleted.\0").unwrap();
+
+                    // Check if the directory exists.
+                    if Path::exists(Path::new(directory)) {
+
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: Directory deletion failed.\0").unwrap();
+
+                    } else {
+
+                        // Send a successful message to the server.
+                        tcpstream_write.write_all(b"Directory deleted.\0").unwrap();
+                        
+                    }
+
+                }
+
                 "dir" => {
 
                     // Debug.
-                    println!("Listing clients from server.");
+                    println!("Listing directory from server.");
 
+                    // Check token length.
+                    if tokens.len() < 2 {
+            
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: No directory provided for listing.\0").unwrap();
+                        continue;
+            
+                    }
                     // Get the first token in the index and set to the directory.
                     let directory = tokens[1];
-                    
+
                     // Read the contents of a directory and send it to the server.
                     match fs::read_dir(directory) {
+
                         Ok(entries) => {
+                        
                             for entry in entries {
 
                                 // Send the directory list to the server.
                                 match entry {
+                        
                                     Ok(path) => {
+                        
                                         let filename = path.file_name().to_string_lossy().to_string();
                                         tcpstream_write.write_all(filename.as_bytes()).unwrap();
                                         tcpstream_write.write_all(b"\0").unwrap();
+                        
                                     }
+                        
                                     Err(e) => eprintln!("Error: {}", e),
+                        
                                 }
+                        
                             }
+                        
                         }
+                        
                         Err(e) => eprintln!("Error: {}", e),
+                    
                     }
 
                 }
@@ -275,6 +434,14 @@ fn main() {
                         // Debug.
                         println!("Creating directory on host.");
 
+                        // Check token length.
+                        if tokens.len() < 2 {
+            
+                            // Send an error message to the server.
+                            tcpstream_write.write_all(b"Error: No directory provided for creation.\0").unwrap();
+                            continue;
+            
+                        }
 
                         let newdirectory = tokens[1];
 
@@ -309,6 +476,15 @@ fn main() {
 
                         // Debug.
                         println!("cat a file and send file contents to the server.");
+
+                        // Check token length.
+                        if tokens.len() < 2 {
+            
+                            // Send an error message to the server.
+                            tcpstream_write.write_all(b"Error: No filename provided for cat.\0").unwrap();
+                            continue;
+            
+                        }
                         let filename = tokens[1];
 
                         match cat(&Path::new(&filename)) {
@@ -324,29 +500,271 @@ fn main() {
                         }
                     }
 
-                "exec" => {
+                    "sysbasic" => {
 
-                    // Debug.
-                    println!("Executing command from server.");
+                        // Debug.
+                        println!("Sending basic system information to server.");
 
-                    if tokens.len() < 2 {
+                        // Send system information.
+                        let output = get_sys_info();
+                        for line in output {
+
+                            tcpstream_write.write_all(line.as_bytes()).unwrap();
+                            tcpstream_write.write_all(b"\0").unwrap();
+                        
+                        }
                     
-                        println!("No command provided after 'exec'.");
-                        continue;
+                    }
+                    
+                    "sysdetails" => {
+
+                        // Debug.
+                        println!("Sending detailed system information to server.");
+
+                        // Please note that we use "new_all" to ensure that all lists of
+                        // CPUs and processes are filled!
+                        // https://docs.rs/sysinfo/latest/sysinfo/
+
+                       // let mut output = Vec::new();
+
+                        // First we update all information of our `System` struct.
+                        sys.refresh_all();
+
+                        let mut output = get_sys_info();
+
+                        // Number of CPUs:
+                        println!("NB CPUs: {}", sys.cpus().len());
+                        output.push(format!("NB CPUs: {}", sys.cpus().len()));
+
+                        // Display processes ID, name na disk usage:
+                        for (pid, process) in sys.processes() {
+                            println!("[{pid}] {:?} {:?} {:?} {:?}", process.name(), process.cmd(), process.environ(), process.exe());
+                            output.push(format!("[{pid}] {:?} {:?} {:?} {:?}", process.name(), process.cmd(), process.environ(), process.exe()));
+                        }
+
+                        // We display all disks' information:
+                        println!("=> disks:");
+                        output.push("=> disks:".to_string());
+                        let disks = Disks::new_with_refreshed_list();
+                        for disk in &disks {
+                            println!("{disk:?}");
+                            output.push(format!("{disk:?}"));
+                        }
+
+                        // Network interfaces name, total data received and total data transmitted:
+                        let networks = Networks::new_with_refreshed_list();
+                        println!("=> networks:");
+                        for (interface_name, data) in &networks {
+                            println!(
+                                "{interface_name}: {} B (down) / {} B (up)",
+                                data.total_received(),
+                                data.total_transmitted(),
+                            );
+                            output.push(format!("{interface_name}: {} B (down) / {} B (up)", data.total_received(), data.total_transmitted()));
+                            // If you want the amount of data received/transmitted since last call
+                            // to `Networks::refresh`, use `received`/`transmitted`.
+                        }
+
+                        // Components temperature:
+                        let components = Components::new_with_refreshed_list();
+                        println!("=> components:");
+                        for component in &components {
+
+                            println!("{component:?}");
+                            output.push(format!("{component:?}"));
+                        
+                        }
+
+                        // Convert the output to a string with each line separated by a newline.
+                        let output = output.join("\n");
+
+                        // write output to server.
+                        tcpstream_write.write_all(output.as_bytes()).unwrap();
+                        tcpstream_write.write_all(b"\0").unwrap();
+                        
+                    }
+
+                    "proc" => {
+
+                        // Debug.
+                        println!("Sending list of processes to server.");
+
+                        let mut output = Vec::new();
+
+                        // Display processes ID, name disk usage:
+                        for (pid, process) in sys.processes() {
+                           // println!("[{pid}] {:?} {:?}", process.name(), process.cmd());
+
+                           // If the process path is null then skip it.
+                           if process.cmd().is_empty() {
+
+                               continue;
+                           
+                           }
+
+                            let p_path =  process.cmd().get(0).unwrap();
+
+                            // Convert the p_path to a string.
+                            let p_path = p_path.to_string_lossy().to_string();
+
+                            // Split the output into a vector of strings.
+                            let p_tmp = p_path.split(' ').collect::<Vec<&str>>();
+                            let p_tmppath = p_tmp[0];
+
+
+                            output.push(format!("[{pid}] {:?} {}", process.name(),p_tmppath));
+
+                        }
+
+                        // Send the list of processes to the server.
+                        let output = output.join("\n");
+                        tcpstream_write.write_all(output.as_bytes()).unwrap();
+                        tcpstream_write.write_all(b"\0").unwrap();
                     
                     }
 
-                    // Join the remaining tokens into a single string which is the command to execute.
-                    let command_to_run = tokens[1..].join(" ");
+                    "kproc" => {
 
-                    // Execute the command and send the output to the server.
-                    let mut output = executecommand(&command_to_run);
+                        // Debug.
+                        println!("Kills a process.");
+
+                        // If there is no second token, send an error message to the server.
+                        if tokens.len() < 2 {
+
+                            tcpstream_write.write_all(b"Error: No process ID provided.").unwrap();
+                            tcpstream_write.write_all(b"\0").unwrap();
+
+                            continue;
+                        
+                        }
+                        
+                        // If the token is not an integer, send an error message to the server.
+                        if !tokens[1].parse::<usize>().is_ok() {
+                        
+                            tcpstream_write.write_all(b"Error: Invalid process ID.").unwrap();
+                            tcpstream_write.write_all(b"\0").unwrap();
+                            continue;
+                        
+                        }
+
+                        // Get the process as the second token as an integer.
+                        let the_pid = tokens[1].parse::<usize>().unwrap();
+
+                        if let Some(process) = sys.process(Pid::from(the_pid.clone())) {
+
+                            process.kill();
+                        
+                        }
+
+                        // Sleep for 5 seconds.
+                        thread::sleep(Duration::from_secs(5));
+
+                        // Refresh the system information.
+                        let proc = System::new_all();
+
+                        // Get the list of processes.
+                        let mut pid_vec = Vec::new();
+                        for (pid, _process) in proc.processes() {
+                        
+                            pid_vec.push(pid.as_u32() as usize);
+                        
+                        }
+
+                        // Check if the_pid is in the list of processes.
+                        if pid_vec.contains(&the_pid) {
+
+                            tcpstream_write.write_all(b"Process was not killed.").unwrap();
+                            tcpstream_write.write_all(b"\0").unwrap();
                     
-                    // Send a null-terminal character to the server to indicate the end of sending the command output.
-                    output.push('\0');
-                    tcpstream_write.write_all(output.as_bytes()).unwrap();
+                        } else {
+                        
+                            tcpstream_write.write_all(b"Process killed.").unwrap();
+                            tcpstream_write.write_all(b"\0").unwrap();
+                        
+                        }
 
-                }
+                    }
+
+                    "pwd" => {
+
+
+                        // Debug.
+                        println!("Sending current directory to server.");
+
+                        // Get the current directory.
+                        let current_dir = env::current_dir().unwrap();
+
+                        // Convert the current directory to a string.
+                        let current_dir = current_dir.to_string_lossy().to_string();
+
+                        // Send the current directory to the server.
+                        tcpstream_write.write_all(current_dir.as_bytes()).unwrap();
+                        tcpstream_write.write_all(b"\0").unwrap();
+                    
+                    }
+
+                    "setcwd" => {
+
+                        // Debug.
+                        println!("Setting current directory.");
+
+                        // If there is no second token, send an error message to the server.
+                        if tokens.len() < 2 {
+
+                            tcpstream_write.write_all(b"Error: No directory provided.").unwrap();
+                            tcpstream_write.write_all(b"\0").unwrap();
+
+                            continue;
+
+                        }
+
+                        // Directory is the second token.
+                        let directory = tokens[1];
+
+                        // Check if the directory exists.
+                        if Path::new(directory).exists() {
+
+                            let root = Path::new(directory);
+                            assert!(env::set_current_dir(&root).is_ok());
+
+                            // Send success message to the server.
+                            tcpstream_write.write_all(b"Successfully changed working directory.").unwrap();
+                            tcpstream_write.write_all(b"\0").unwrap();
+
+                        } else {
+
+                            let dir_error = format!("Error: Directory {} does not exist.", directory);
+                            // Send error message to the server.
+                            tcpstream_write.write_all(dir_error.as_bytes()).unwrap();
+                            tcpstream_write.write_all(b"\0").unwrap();
+
+                        }
+
+                    }
+
+                    "exec" => {
+
+                        // Debug.
+                        println!("Executing command from server.");
+
+                        if tokens.len() < 2 {
+                        
+                            println!("No command provided after 'exec'.");
+                            continue;
+                        
+                        }
+
+                        // Join the remaining tokens into a single string which is the command to execute.
+                        let command_to_run = tokens[1..].join(" ");
+
+                        // Execute the command and send the output to the server.
+                        let mut output = executecommand(&command_to_run);
+                        
+                        // Send a null-terminal character to the server to indicate the end of sending the command output.
+                        output.push('\0');
+                        tcpstream_write.write_all(output.as_bytes()).unwrap();
+
+                    }
 
                 _ => {
 

