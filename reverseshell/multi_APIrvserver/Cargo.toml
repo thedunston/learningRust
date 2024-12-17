@@ -1,0 +1,9 @@
+[package]
+name = "multi_rvserver"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+base64 = "0.13"
+hostname = "0.3"
