@@ -221,7 +221,7 @@ fn handle_http_request(request_line: &str, clients: &Arc<Mutex<Vec<ClientInfo>>>
         other => {
 
             // Return an error message.
-            format!("Command '{}' ", other)
+            format!("Command '{}' not implemented for immediate HTTP response.", other)
         
         }
     
@@ -762,7 +762,7 @@ fn main() {
                                      }
                                     
                                     // Match muliple commands since they will have the same output format.
-                                    "exec" | "mkdir" | "dir" | "cat" | "rm" | "rmdir" | "pwd" | "setcwd" | "sysbasic" | "sysdetails" | "proc" | "kproc" => {
+                                    "exec" | "mkdir" | "dir" | "cat" | "rm" | "rmdir" | "pwd" | "setcwd" | "sysbasic" | "sysdetails" | "proc" | "kproc" | "env" | "movefile" | "movedir" => {
 
                                         println!("{}", message);
                                         println!("Received from client {}:", client_id);

