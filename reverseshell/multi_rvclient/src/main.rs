@@ -128,7 +128,9 @@ fn main() {
             let mut receivingbuffer: Vec<u8> = Vec::new();
             let bytes_read = bufreader.read_until(b'\0', &mut receivingbuffer).unwrap();
 
-            // If no more data from server, break out of the loop.
+            // If no more data from server, break the loop.
+            // NOTE: Update the code to have the client continue to retry the connection
+            // if the server is not available.    
             if bytes_read == 0 {
             
                 println!("Server closed connection or no more commands.");
